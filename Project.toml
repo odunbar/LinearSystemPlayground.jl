@@ -2,3 +2,13 @@ name = "LinearSystemPlayground"
 uuid = "ed1282aa-c5d0-4fe9-876d-c40b72191853"
 version = "0.1.0"
 authors = ["odunbar <odunbar@caltech.edu>"]
+
+[deps]
+IterativeSolvers = "42fd0dbc-a981-5370-80f2-aaf504508153"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+
+[compat]
+IterativeSolvers = "0.9.4"
+LinearAlgebra = "1.12.0"
+SparseArrays = "1.12.0"
