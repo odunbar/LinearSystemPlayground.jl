@@ -65,3 +65,13 @@ function build_a(n::Int)
     println("Condition number ", cond(Matrix(A)))
     return A, T1, U, Vt, T2
 end
+
+
+# Get A from file
+function load_a_from_serialize(filepath)
+    data = deserialize(filepath)
+    A = data.A
+    
+    # Define the blocks T1 U Vt T2 here and return below - may need to resort A and b too
+    return data.A
+end

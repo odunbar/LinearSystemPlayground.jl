@@ -1,8 +1,10 @@
-# build matrix pkg
+# build/load matrix pkg
 using LinearAlgebra
 using LinearMaps
 using SparseArrays
 using Random
+using Serialization
+using BandedMatrices
 
 #solver pkg
 using IterativeSolvers
@@ -18,10 +20,17 @@ include("build_a.jl") # builds the matri
 include("build_rhs.jl") # builds the rhs
 
 # build the linear systems
-
+#=
 A, T1, U, Vt, T2 = build_a(n)
 b = build_rhs(size(A,2))
+=#
 
+# load from file
+#filepath = "../../matrix_vector_pairs/linear_system_trmm_0M.jls" 
+#filepath = "../../matrix_vector_pairs/linear_system_trmm_1M.jls"
+filepath = "../../matrix_vector_pairs/linear_system_rico_1M.jls"
+A = load_a_from_serialize(filepath)
+b = load_rhs_from_serialize(filepath)
 # -----------
 # Full solves: A
 # ----------- 
@@ -45,8 +54,8 @@ x = gmres(A,b)
     P = ilu($A)              # ILU(0)
     gmres($A, $b, Pl=P)  # left preconditioning
 end
-@allocated gmres(A,b, Pl=P)
 P = ilu(A)              # ILU(0)
+@allocated gmres(A,b, Pl=P)
 x = gmres(A, b, Pl=P)
 @info "error $(norm(x - x_true))"      
 
@@ -59,7 +68,7 @@ x_it = zeros(size(A,2))
 
 M = I - iAd .* A
 spect = maximum(abs, eigvals(Matrix(M)))
-@info "spectral radius: $(maximum(abs, eigvals(M))) must be <1 to converge)"
+@info "spectral radius: $(maximum(abs, eigvals(Matrix(M)))) must be <1 to converge)"
 if spect < 1
     for i=1:k
         x_it .= x_it + iAd.*(b - A*x_it)
@@ -152,7 +161,7 @@ iS2 = Diagonal(1 ./ diag(S2)) # correct
 # check spectral radii
 M = I - iS2*S2
 spect = maximum(abs, eigvals(M))
-@info "spectral radius: $(maximum(abs, eigvals(M))) must be <1 to converge)"
+@info "spectral radius: $(maximum(abs, eigvals(Matrix(M)))) must be <1 to converge)"
 if spect < 1
     for i=1:k
         x_it .= x_it + iS2 * (rhs - S2*x_it)
