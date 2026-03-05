@@ -31,10 +31,15 @@ B1, B2 = ["c.ρ", "c.sgs.q_tot", "c.sgs.mse", "c.sgs.ρa", "c.ρq_tot", "c.ρe_t
 
 #filepath = "../../matrix_vector_pairs/linear_system_trmm_1M.jls"
 # filepath = "../../matrix_vector_pairs/linear_system_rico_1M.jls"
-A = load_a_from_serialize(filepath)
+# original matrix
+# A = load_a_from_serialize(filepath)
 # b = load_rhs_from_serialize(filepath)
+
+# Blocks
 T1, U, Vt, T2 = load_a_from_serialize(filepath, B1, B2)
-b = load_rhs_from_serialize(filepath, B1, B2)
+b1, b2 = load_rhs_from_serialize(filepath, B1, B2)
+
+
 # -----------
 # Full solves: A
 # ----------- 
