@@ -115,7 +115,23 @@ function build_local_offsets(vars, sizes)
 end
 
 """
-Build A in the block structure dictated by B1,B2, (arrays of string-names for the blocks). If B2 is nothing, then simply build one block encoded by B1 (for example, by reordering from the original `var_order` this could represent a block-wise permutation of `A`)
+    build_a_from_serialize(filepath, B1, B2=nothing)
+
+Reconstruct sparse matrix blocks from serialized block data.
+
+`B1` and `B2` specify the variable ordering used to assemble the matrix.
+If `B2 === nothing`, a single matrix `A` with ordering `B1` is returned
+(e.g. a block-permuted version of the original matrix).
+
+If `B2` is provided, the matrix is assembled in block form
+
+    [ T1  U
+      Vt  T2 ]
+
+where `T1`, `U`, `Vt`, and `T2` correspond to interactions between
+variables in `B1` and `B2`.
+
+Returns `(T1, U, Vt, T2)` if `B2` is given, otherwise `A`.
 """
 function load_a_from_serialize(filepath, B1, B2=nothing)
     data = deserialize(filepath)
