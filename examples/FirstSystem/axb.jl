@@ -26,11 +26,15 @@ b = build_rhs(size(A,2))
 =#
 
 # load from file
-#filepath = "../../matrix_vector_pairs/linear_system_trmm_0M.jls" 
+filepath = "../../matrix_vector_pairs/linear_system_trmm_0M.jls"
+B1, B2 = ["c.ρ", "c.sgs.q_tot", "c.sgs.mse", "c.sgs.ρa", "c.ρq_tot", "c.ρe_tot", "c.ρtke", ], ["c.uh.1", "c.uh.2", "f.u3", "f.sgs.u3"]
+
 #filepath = "../../matrix_vector_pairs/linear_system_trmm_1M.jls"
-filepath = "../../matrix_vector_pairs/linear_system_rico_1M.jls"
+# filepath = "../../matrix_vector_pairs/linear_system_rico_1M.jls"
 A = load_a_from_serialize(filepath)
-b = load_rhs_from_serialize(filepath)
+# b = load_rhs_from_serialize(filepath)
+T1, U, Vt, T2 = load_a_from_serialize(filepath, B1, B2)
+b = load_rhs_from_serialize(filepath, B1, B2)
 # -----------
 # Full solves: A
 # ----------- 

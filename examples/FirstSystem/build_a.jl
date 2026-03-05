@@ -72,6 +72,116 @@ function load_a_from_serialize(filepath)
     data = deserialize(filepath)
     A = data.A
     
-    # Define the blocks T1 U Vt T2 here and return below - may need to resort A and b too
     return data.A
+end
+
+function add_uniform_scaling!(α, row0, col0, nrow, ncol, I, J, V)
+    n = min(nrow, ncol)
+    @inbounds for i in 1:n
+        a = FT(α)
+        if a != 0.0
+            push!(I, row0 + i - 1)
+            push!(J, col0 + i - 1)
+            push!(V, a)
+        end
+    end
+end
+
+function add_banded!(B::BandedMatrix, row0, col0, I, J, V)
+    nrow, ncol = size(B)
+    kl, ku = bandwidths(B)
+    @inbounds for j in 1:ncol
+        i1 = max(1, j - ku)
+        i2 = min(nrow, j + kl)
+        for i in i1:i2
+            a = FT(B[i, j])
+            if a != 0.0
+                push!(I, row0 + i - 1)
+                push!(J, col0 + j - 1)
+                push!(V, a)
+            end
+        end
+    end
+end
+
+function build_local_offsets(vars, sizes)
+    offsets = Dict{String,Int}()
+    pos = 1
+    for v in vars
+        offsets[v] = pos
+        pos += sizes[v]
+    end
+    return offsets
+end
+
+"""
+Build A in the block structure dictated by B1,B2, (arrays of string-names for the blocks). If B2 is nothing, then simply build one block encoded by B1 (for example, by reordering from the original `var_order` this could represent a block-wise permutation of `A`)
+"""
+function load_a_from_serialize(filepath, B1, B2=nothing)
+    data = deserialize(filepath)
+
+    # rebuild matrix blocks from keys
+    var_order = data.var_order
+    if !isnothing(B2)
+        block_var_orders = Dict(
+            :T1=>[B1, B1], #T1
+            :U=>[B1, B2], #U
+            :Vt=>[B2, B1], #Vt
+            :T2=>[B2, B2], #T2
+        )
+    else
+        block_var_orders = Dict(
+            :A=>[B1, B1],
+        )
+    end
+    offsets = data.offsets
+    sizes = data.sizes
+    block_arrays = data.block_arrays
+    built_blocks=Dict()
+    FT = eltype(data.f)
+    for block in keys(block_var_orders)
+        I = Int[]
+        J = Int[]
+        V = FT[]
+        N1 = sum(sizes[bs] for bs in block_var_orders[block][1])
+        N2 = sum(sizes[bs] for bs in block_var_orders[block][2])
+        local_row_offsets = build_local_offsets(block_var_orders[block][1], sizes)
+        local_col_offsets = build_local_offsets(block_var_orders[block][2], sizes)
+        
+        for vi in block_var_orders[block][1]
+            row0 = local_row_offsets[vi]
+            nrow = sizes[vi]
+            
+            for vj in block_var_orders[block][2]
+                col0 = local_col_offsets[vj]
+                ncol = sizes[vj]
+                
+                key = (vi, vj)
+                haskey(block_arrays, key) || continue
+                blk = block_arrays[key]
+                
+                if blk isa UniformScaling
+                    add_uniform_scaling!(blk.λ, row0, col0, nrow, ncol, I, J, V)
+                    
+                elseif blk isa BandedMatrix
+                    add_banded!(blk, row0, col0, I, J, V)
+                    
+                else
+                    error("Unsupported block type $(typeof(blk)) for key ($vi,$vj)")
+                end
+            end
+        end
+
+        #to get block-local indices, take off the block start index
+        I_from_one = I .- minimum(I) .+ 1
+        J_from_one = J .- minimum(J) .+ 1
+        built_blocks[block] = sparse(I_from_one, J_from_one, V, N1, N2)
+        
+    end
+
+    if !isnothing(B2)
+        return built_blocks[:T1], built_blocks[:U], built_blocks[:Vt], built_blocks[:T2]
+    else
+        return built_blocks[:A]
+    end
 end
