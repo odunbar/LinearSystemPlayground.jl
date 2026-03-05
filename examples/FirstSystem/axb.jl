@@ -153,12 +153,12 @@ S2 = Matrix(T2) - Vt * z_U
 x_it = zeros(size(T2,1))
 
 # correct Jacobi preconditioning
-iS2 = 1 ./ diag(S2) # correct
-#iS2 = 1 ./ diag(T2) # approx
-#iS2 = 1 ./ (T2 - Vt * diag(T1) * Umat) # what clima claims?
+iS2 = Diagonal(1 ./ diag(S2)) # correct
+#iS2 = Diagonal(1 ./ diag(T2)) # approx
+#iS2 = (Matrix(T2 - Vt * (iTd .* U))) # what clima claims?
 
 for i=1:k
-    x_it .= x_it + iS2 .* (rhs - S2*x_it)
+    x_it .= x_it + iS2 * (rhs - S2*x_it)
     println(norm(x_it-x2_true))
 end
 x1 = z_b - z_U * x_it
