@@ -27,26 +27,48 @@ b = build_rhs(size(A,2))
 # ----------- 
 
 # [1] Naive solve
+@info "Naive solve: A\\b"
 @btime $A \ $b
 @allocated A \ b
+x_true = A\b
+
 # [2] Iterative solve - no precond
+@info "iterative solve (no precond): gmres(A,b)"
 @btime gmres($A, $b)
 @allocated gmres(A,b)
+x = gmres(A,b)
+@info "error $(norm(x - x_true))"
 
 # [3] Iterative solve - with basic left precond
-P = ilu(A)              # ILU(0)
-@btime gmres($A, $b, Pl=$P)  # left preconditioning
+@info "iterative solve (ilu precond): gmres(A,b, Pl=P)"
+@btime begin
+    P = ilu($A)              # ILU(0)
+    gmres($A, $b, Pl=P)  # left preconditioning
+end
 @allocated gmres(A,b, Pl=P)
-
+P = ilu(A)              # ILU(0)
+x = gmres(A, b, Pl=P)
+@info "error $(norm(x - x_true))"      
 
 # [4] Jacobi solve
+@info "Fixed-point solve (diag(A) precond)"
 k=20
 Ad = diag(A)
 iAd = 1 ./ Ad
 x_it = zeros(size(A,2))
-for i=1:k
-    x_it .= x_it + iAd.*(b - A*x_it)
-    println(norm(x_it-x))
+
+M = I - iAd .* A
+spect = maximum(abs, eigvals(Matrix(M)))
+@info "spectral radius: $(maximum(abs, eigvals(M))) must be <1 to converge)"
+if spect < 1
+    for i=1:k
+        x_it .= x_it + iAd.*(b - A*x_it)
+        println(norm(x_it-x))
+    end
+    x = x_it
+    @info "error $(norm(x - x_true))"
+else
+    @warn "skipping test due to spectral radius $(spect) > 1"
 end
 # I wont time as this iteration blows up
 
@@ -56,89 +78,59 @@ end
 
 # split rhs
 s1 = size(T1,1) 
-
 b1, b2 = b[1:s1], b[s1+1:end]
-
-# for btime, preallocate sizes:
 Umat = Matrix(U)
 
+
 # [1] Naive solve
-@btime begin
-    z_b = $T1 \ $b1
-    z_U = $T1 \ $Umat
-    S2 = $T2 - $Vt * z_U 
-    x2 = $S2 \ ($b2 - $Vt*z_b)
+@info "Naive solve, Schur: T1\\b1, T1\\U, S2 \\ rhs"
+function do_schur_solve(T1, U, Vt, T2, Umat, b1, b2)
+    F1 = factorize(T1)
+    z_b = F1 \ b1
+    z_U = F1 \ Umat
+    S2 = T2 - Vt * z_U 
+    x2 = S2 \ (b2 - Vt*z_b)
     x1 = z_b - z_U * x2
+    return [x1;x2]
 end
-
-# [2] GMRES with no precond, and allocates
-
-# define the linear map:
-schur_action(x) = T2 * x - Vt * (T1 \ (U*x))
-schur_adj_action(x) = T2' * x - U' * (T1 \ (Vt'*x))
-
-S2 = LinearMap(
-    schur_action,
-    schur_adj_action,
-    size(T2,1),
-    size(T2,1),
-)
 
 @btime begin
-    rhs = $b2 - $Vt*($T1\$b1)
-    x2 = gmres($S2, rhs)
-    x1 = $T1 \ ($b1-$Umat*x2)
+    do_schur_solve($T1, $U, $Vt, $T2, $Umat, $b1, $b2)
+end
+x = do_schur_solve(T1, U, Vt, T2, Umat, b1, b2)
+@info "err: $(norm(x_true - x))"
+
+# [2] GMRES with (Schur with T2 precond), and allocates
+@info "GMRES (T2 precond) on Schur"
+function do_gmres_schur_solve_PT2(T1, U, Vt, T2, Umat, b1, b2)
+    F1 = lu(T1)
+    schur_action(x) = T2 * x - Vt * (F1 \ (U*x))
+    schur_adj_action(x) = T2' * x - U' * (F1 \ (Vt'*x))
+    
+    S2 = LinearMap(
+        schur_action,
+        schur_adj_action,
+        size(T2,1),
+        size(T2,1),
+    )
+
+    PT2 = ilu(T2)
+    rhs = b2 - Vt*(F1\b1)
+    x2 = gmres(S2, rhs ; Pl=PT2)
+    x1 = F1 \ (b1-Umat*x2)
+    return [x1;x2]
 end
 
-
-# [2] GMRES with no precond, no allocates
-tmp1 = zeros(eltype(T1), size(U,1))
-tmp2 = similar(tmp1)
-F = factorize(Matrix(T1))
-
-function schur_action!(y,x)
-    mul!(tmp1, Umat, x)
-    ldiv!(tmp2, F, tmp1) # tmp2=T1\(U*x)
-    mul!(y, T2, x) # y= T2*x
-    mul!(y, Vt, tmp2, -1, 1) # y = 1 y - 1 V'* tmp2
-end
-
-tmp3 = zeros(eltype(T1), size(Vt,2))
-tmp4 = similar(tmp3)
-function schur_adj_action!(y,x)
-    mul!(tmp3, Vt', x)
-    ldiv!(tmp4, F', tmp3) # tmp4 = T1'\(V*x)
-    mul!(y, T2', x) # y= T2'*x
-    mul!(y, U', tmp4, -1, 1) # y = 1 y - 1 U'* tmp4
-end
-
-S2_noalloc = LinearMap(
-    schur_action!,
-    schur_adj_action!,
-    size(T2,1),
-    size(T2,1),
-)
+@info "GMRES (S2 precond) on Schur"
 @btime begin
-    rhs = $b2 - $Vt*($F\$b1)
-    x2 = gmres($S2_noalloc, rhs)
-    x1 = $F \ ($b1-$Umat*x2)
+    do_gmres_schur_solve_PT2($T1, $U, $Vt, $T2, $Umat, $b1, $b2)
 end
 
-# [2] GMRES with precond, no allocates
-# Here is a reasonable preconditioner:
-P = ilu(T2)              # ILU(0)
-@btime begin
-    rhs = $b2 - $Vt*($F\$b1)
-    x2 = gmres($S2_noalloc, rhs, Pl=$P)
-    x1 = $Ff \ ($b1-$Umat*x2)
-end
-
-
-# lesson learnt, don't do GMRES on the schur complement due to the internal linear solve (and poorer conditioning)
+x=do_gmres_schur_solve_PT2(T1, U, Vt, T2, Umat, b1, b2)
+@info "err: $(norm(x_true - x)))"
 
 # [3] Jacobi
 #true soln
-x_true = A\b
 x1_true,x2_true = x_true[1:s1], x_true[s1+1:end]
     
 k=20
@@ -157,12 +149,19 @@ iS2 = Diagonal(1 ./ diag(S2)) # correct
 #iS2 = Diagonal(1 ./ diag(T2)) # approx
 #iS2 = (Matrix(T2 - Vt * (iTd .* U))) # what clima claims?
 
-for i=1:k
-    x_it .= x_it + iS2 * (rhs - S2*x_it)
-    println(norm(x_it-x2_true))
+# check spectral radii
+M = I - iS2*S2
+spect = maximum(abs, eigvals(M))
+@info "spectral radius: $(maximum(abs, eigvals(M))) must be <1 to converge)"
+if spect < 1
+    for i=1:k
+        x_it .= x_it + iS2 * (rhs - S2*x_it)
+        println(norm(x_it-x2_true))
+    end
+    x1 = z_b - z_U * x_it
+else
+    @warn "skipping test due to spectral radius $(spect) > 1"
 end
-x1 = z_b - z_U * x_it
-
 # Also doesnt seem to converge
 
 
