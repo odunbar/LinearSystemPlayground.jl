@@ -32,13 +32,15 @@ B1, B2 = ["c.ρ", "c.sgs.q_tot", "c.sgs.mse", "c.sgs.ρa", "c.ρq_tot", "c.ρe_t
 #filepath = "../../matrix_vector_pairs/linear_system_trmm_1M.jls"
 # filepath = "../../matrix_vector_pairs/linear_system_rico_1M.jls"
 # original matrix
-# A = load_a_from_serialize(filepath)
-# b = load_rhs_from_serialize(filepath)
+#A = load_a_from_serialize(filepath)
+#b = load_rhs_from_serialize(filepath)
 
 # Blocks
 T1, U, Vt, T2 = load_a_from_serialize(filepath, B1, B2)
 b1, b2 = load_rhs_from_serialize(filepath, B1, B2)
-
+# we can also load A,b in new ordering:
+A = load_a_from_serialize(filepath, [B1;B2])
+b = load_rhs_from_serialize(filepath, [B1;B2])
 
 # -----------
 # Full solves: A
@@ -46,30 +48,37 @@ b1, b2 = load_rhs_from_serialize(filepath, B1, B2)
 
 # [1] Naive solve
 @info "Naive solve: A\\b"
-@btime $A \ $b
-@allocated A \ b
-x_true = A\b
+@btime begin
+    $A \ $b
+    nothing
+end
+x_true = A\b;
+
 
 # [2] Iterative solve - no precond
-@info "iterative solve (no precond): gmres(A,b)"
-@btime gmres($A, $b)
+@info "\n iterative solve (no precond): gmres(A,b)"
+@btime begin
+    gmres($A, $b)
+    nothing
+end
 @allocated gmres(A,b)
-x = gmres(A,b)
+x = gmres(A,b);
 @info "error $(norm(x - x_true))"
 
 # [3] Iterative solve - with basic left precond
-@info "iterative solve (ilu precond): gmres(A,b, Pl=P)"
+@info "\n iterative solve (ilu precond): gmres(A,b, Pl=P)"
 @btime begin
     P = ilu($A)              # ILU(0)
     gmres($A, $b, Pl=P)  # left preconditioning
+    nothing
 end
 P = ilu(A)              # ILU(0)
 @allocated gmres(A,b, Pl=P)
-x = gmres(A, b, Pl=P)
+x = gmres(A, b, Pl=P);
 @info "error $(norm(x - x_true))"      
 
 # [4] Jacobi solve
-@info "Fixed-point solve (diag(A) precond)"
+@info "\n Fixed-point solve (diag(A) precond)"
 k=20
 Ad = diag(A)
 iAd = 1 ./ Ad
@@ -96,12 +105,12 @@ end
 
 # split rhs
 s1 = size(T1,1) 
-b1, b2 = b[1:s1], b[s1+1:end]
+#b1, b2 = b[1:s1], b[s1+1:end]
 Umat = Matrix(U)
 
 
 # [1] Naive solve
-@info "Naive solve, Schur: T1\\b1, T1\\U, S2 \\ rhs"
+@info "\n Naive solve, Schur: T1\\b1, T1\\U, S2 \\ rhs"
 function do_schur_solve(T1, U, Vt, T2, Umat, b1, b2)
     F1 = factorize(T1)
     z_b = F1 \ b1
@@ -114,12 +123,14 @@ end
 
 @btime begin
     do_schur_solve($T1, $U, $Vt, $T2, $Umat, $b1, $b2)
+    nothing
 end
-x = do_schur_solve(T1, U, Vt, T2, Umat, b1, b2)
+
+x = do_schur_solve(T1, U, Vt, T2, Umat, b1, b2);
 @info "err: $(norm(x_true - x))"
 
 # [2] GMRES with (Schur with T2 precond), and allocates
-@info "GMRES (T2 precond) on Schur"
+@info "\n GMRES (T2 precond) on Schur"
 function do_gmres_schur_solve_PT2(T1, U, Vt, T2, Umat, b1, b2)
     F1 = lu(T1)
     schur_action(x) = T2 * x - Vt * (F1 \ (U*x))
@@ -139,18 +150,20 @@ function do_gmres_schur_solve_PT2(T1, U, Vt, T2, Umat, b1, b2)
     return [x1;x2]
 end
 
-@info "GMRES (S2 precond) on Schur"
 @btime begin
     do_gmres_schur_solve_PT2($T1, $U, $Vt, $T2, $Umat, $b1, $b2)
+    nothing
 end
-
-x=do_gmres_schur_solve_PT2(T1, U, Vt, T2, Umat, b1, b2)
+@allocated do_gmres_schur_solve_PT2(T1, U, Vt, T2, Umat, b1, b2)
+x=do_gmres_schur_solve_PT2(T1, U, Vt, T2, Umat, b1, b2);
 @info "err: $(norm(x_true - x)))"
 
-# [3] Jacobi
+# [3] Fixed point iteration
 #true soln
 x1_true,x2_true = x_true[1:s1], x_true[s1+1:end]
-    
+
+@info "\n Fixed-point solve (diag(T2) precond)"
+
 k=20
 Td = diag(T1)
 iTd = 1 ./ Td
@@ -163,9 +176,9 @@ S2 = Matrix(T2) - Vt * z_U
 x_it = zeros(size(T2,1))
 
 # correct Jacobi preconditioning
-iS2 = Diagonal(1 ./ diag(S2)) # correct
-#iS2 = Diagonal(1 ./ diag(T2)) # approx
-#iS2 = (Matrix(T2 - Vt * (iTd .* U))) # what clima claims?
+# iS2 = Diagonal(1 ./ diag(S2)) # correct
+ iS2 = Diagonal(1 ./ diag(T2)) # approx
+# iS2 = (Matrix(T2 - Vt * (iTd .* U))) # what clima claims?
 
 # check spectral radii
 M = I - iS2*S2
