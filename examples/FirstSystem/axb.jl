@@ -31,8 +31,8 @@ case = cases[3]
 
 if case == "trmm_0M"
     filepath = "../../matrix_vector_pairs/linear_system_trmm_0M.jls"
-    B1 = ["c.ρ", "c.sgs.q_tot", "c.sgs.mse", "c.sgs.ρa", "c.ρq_tot", "c.ρe_tot", "c.ρtke", ]
-    B2 = ["c.uh.1", "c.uh.2", "f.u3", "f.sgs.u3"]
+    B2 = ["c.ρ", "c.sgs.q_tot", "c.sgs.mse", "c.sgs.ρa", "c.ρq_tot", "c.ρe_tot", "c.ρtke", ]
+    B1 = ["c.uh.1", "c.uh.2", "f.u3", "f.sgs.u3"]
 elseif case == "trmm_1M"
     filepath = "../../matrix_vector_pairs/linear_system_trmm_1M.jls"
     B1 =  ["c.ρ", "c.sgs.q_liq", "c.sgs.q_ice", "c.sgs.q_rai", "c.sgs.q_sno", "c.sgs.q_tot", "c.sgs.mse", "c.sgs.ρa", "c.ρq_liq", "c.ρq_ice", "c.ρq_rai", "c.ρq_sno", "c.ρq_tot", "c.ρe_tot", "c.ρtke"]
@@ -179,7 +179,7 @@ x=do_gmres_schur_solve_PT2(T1, U, Vt, T2, Umat, b1, b2);
 #true soln
 x1_true,x2_true = x_true[1:s1], x_true[s1+1:end]
 
-@info "\n Fixed-point solve (diag(T2) precond)"
+@info "\n Fixed-point solve (with precond)"
 
 k=20
 Td = diag(T1)
@@ -193,9 +193,9 @@ S2 = Matrix(T2) - Vt * z_U
 x_it = zeros(size(T2,1))
 
 # correct Jacobi preconditioning
-# iS2 = Diagonal(1 ./ diag(S2)) # correct
- iS2 = Diagonal(1 ./ diag(T2)) # approx
-# iS2 = (Matrix(T2 - Vt * (iTd .* U))) # what clima claims?
+#iS2 = Diagonal(1 ./ diag(S2)) # correct
+# iS2 = Diagonal(1 ./ diag(T2)) # approx
+iS2 = (Matrix(T2 - Vt * (iTd .* U))) # what clima claims?
 
 # check spectral radii
 M = I - iS2*S2
