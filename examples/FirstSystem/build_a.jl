@@ -189,9 +189,7 @@ function load_a_from_serialize(filepath, B1, B2=nothing)
         end
 
         #to get block-local indices, take off the block start index
-        I_from_one = I .- minimum(I) .+ 1
-        J_from_one = J .- minimum(J) .+ 1
-        built_blocks[block] = sparse(I_from_one, J_from_one, V, N1, N2)
+        built_blocks[block] = sparse(I, J, V, N1, N2)
         
     end
 
