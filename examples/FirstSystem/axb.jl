@@ -163,34 +163,39 @@ x = do_schur_solve(T1, U, Vt, T2, Umat, b1, b2);
 @info "err: $(norm(x_true - x))"
 
 # [2] GMRES with (Schur with T2 precond), and allocates
-@info "\n GMRES (T2 precond) on Schur"
-function do_gmres_schur_solve_PT2(T1, U, Vt, T2, Umat, b1, b2)
-    F1 = lu(T1)
+@info "\n GMRES (diagT1-based S2 precond) on Schur"
+function do_gmres_schur_solve_PS2(T1, U, Vt, T2, Umat, b1, b2)
+    F1 = ilu(T1)
     schur_action(x) = T2 * x - Vt * (F1 \ (U*x))
     schur_adj_action(x) = T2' * x - U' * (F1 \ (Vt'*x))
     
-    S2 = LinearMap(
+    S2 = LinearMap{eltype(T2)}(
         schur_action,
         schur_adj_action,
         size(T2,1),
         size(T2,1),
     )
 
-    PT2 = ilu(T2)
-    rhs = b2 - Vt*(F1\b1)
-    x2 = gmres(S2, rhs ; Pl=PT2)
-    x1 = F1 \ (b1-Umat*x2)
+    Td = diag(T1)
+    iTd = 1 ./ Td
+    PS2 = ilu(T2 - Vt * (iTd .* U)) # what clima does
+    z = F1\b1
+    rhs = b2 - Vt*z
+    x2 = gmres(S2, rhs ; Pl=PS2)
+    x1 = z - F1\(Umat*x2)
     return [x1;x2]
 end
 
 @btime begin
-    do_gmres_schur_solve_PT2($T1, $U, $Vt, $T2, $Umat, $b1, $b2)
+    do_gmres_schur_solve_PS2($T1, $U, $Vt, $T2, $Umat, $b1, $b2)
     nothing
 end
-@allocated do_gmres_schur_solve_PT2(T1, U, Vt, T2, Umat, b1, b2)
+@allocated do_gmres_schur_solve_PS2(T1, U, Vt, T2, Umat, b1, b2)
 
-P = ilu(T2)              # ILU(0)
-function apply_PinvT2(v)
+Td = diag(T1)
+iTd = 1 ./ Td
+P = ilu(T2 - Vt * (iTd .* U)) # what clima does
+function apply_PinvS2(v)
     F1 = lu(T1)
     schur_action(x) = T2 * x - Vt * (F1 \ (U*x))
     schur_adj_action(x) = T2' * x - U' * (F1 \ (Vt'*x))
@@ -204,14 +209,14 @@ function apply_PinvT2(v)
     P \ (S2 * v)
 end
 
-PinvT2 = LinearMap(apply_PinvT2, size(T2,1))
-ev=eigs(Matrix(PinvT2), nev=6)[1] # get 20 evs
+PinvS2 = LinearMap(apply_PinvS2, size(T2,1))
+ev=eigs(Matrix(PinvS2), nev=6)[1] # get 20 evs
 spect_range = [maximum(abs,ev), minimum(abs,ev)]
 @info "Precond cond. number = $(spect_range[1]/spect_range[2]) [closer to 1 is better]"
 @info "Precond. min eval magnitude= $(spect_range[2]) [larger is better]"
 
 
-x=do_gmres_schur_solve_PT2(T1, U, Vt, T2, Umat, b1, b2);
+x=do_gmres_schur_solve_PS2(T1, U, Vt, T2, Umat, b1, b2);
 @info "err: $(norm(x_true - x)))"
 
 # [3] Fixed point iteration - Currently in clima
@@ -237,8 +242,7 @@ function apply_fixed_point_iteration(T1, U, Vt, T2, Umat, b1, b2, num_iter)
     # build a preconditioner
     Td = diag(T1)
     iTd = 1 ./ Td
-    S2_prec = Matrix(T2 - Vt * (iTd .* U)) # what clima does
-
+    S2_prec = T2 - Vt * (iTd .* U) # what clima does
     # create the schur solver
     F1 = lu(T1)
     schur_action(x) = T2 * x - Vt * (F1 \ (U*x))
@@ -250,10 +254,12 @@ function apply_fixed_point_iteration(T1, U, Vt, T2, Umat, b1, b2, num_iter)
         size(T2,1),
         size(T2,1),
     )
-    for i=1:k
+    z_b = F1\b1
+    rhs = b2-Vt*z_b
+    for i=1:num_iter
         x_it .= x_it + S2_prec \ (rhs - S2*x_it)
     end
-    x1 = (F1 \ b1) - (F1 \ (U * x_it))
+    x1 = z_b - (F1 \ (U * x_it))
     return [x1;x_it]
 end
 num_iter=2
