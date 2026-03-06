@@ -26,11 +26,28 @@ b = build_rhs(size(A,2))
 =#
 
 # load from file
-filepath = "../../matrix_vector_pairs/linear_system_trmm_0M.jls"
-B1, B2 = ["c.ρ", "c.sgs.q_tot", "c.sgs.mse", "c.sgs.ρa", "c.ρq_tot", "c.ρe_tot", "c.ρtke", ], ["c.uh.1", "c.uh.2", "f.u3", "f.sgs.u3"]
+cases = ["trmm_0M", "trmm_1M", "rico_1M"]
+case = cases[3]
 
-#filepath = "../../matrix_vector_pairs/linear_system_trmm_1M.jls"
-# filepath = "../../matrix_vector_pairs/linear_system_rico_1M.jls"
+if case == "trmm_0M"
+    filepath = "../../matrix_vector_pairs/linear_system_trmm_0M.jls"
+    B1 = ["c.ρ", "c.sgs.q_tot", "c.sgs.mse", "c.sgs.ρa", "c.ρq_tot", "c.ρe_tot", "c.ρtke", ]
+    B2 = ["c.uh.1", "c.uh.2", "f.u3", "f.sgs.u3"]
+elseif case == "trmm_1M"
+    filepath = "../../matrix_vector_pairs/linear_system_trmm_1M.jls"
+    B1 =  ["c.ρ", "c.sgs.q_liq", "c.sgs.q_ice", "c.sgs.q_rai", "c.sgs.q_sno", "c.sgs.q_tot", "c.sgs.mse", "c.sgs.ρa", "c.ρq_liq", "c.ρq_ice", "c.ρq_rai", "c.ρq_sno", "c.ρq_tot", "c.ρe_tot", "c.ρtke"]
+    B2 = ["c.uh.1", "c.uh.2", "f.sgs.u3", "f.u3"]
+elseif case == "rico_1M"
+    filepath = "../../matrix_vector_pairs/linear_system_rico_1M.jls"
+    B1 =  ["c.ρ", "c.sgs.q_liq", "c.sgs.q_ice", "c.sgs.q_rai", "c.sgs.q_sno", "c.sgs.q_tot", "c.sgs.mse", "c.sgs.ρa", "c.ρq_liq", "c.ρq_ice", "c.ρq_rai", "c.ρq_sno", "c.ρq_tot", "c.ρe_tot", "c.ρtke"]
+    B2 = ["c.uh.1", "c.uh.2", "f.sgs.u3", "f.u3"]
+else
+    @error "Please select case from $cases. Recieved $case"
+end
+@info "Running tests for case $case"
+@info "loading $(filepath)"
+@info "blockwise solves based on blocks B1 = $B1,\n B2 = $B2"
+
 # original matrix
 #A = load_a_from_serialize(filepath)
 #b = load_rhs_from_serialize(filepath)
@@ -47,7 +64,7 @@ b = load_rhs_from_serialize(filepath, [B1;B2])
 # ----------- 
 
 # [1] Naive solve
-@info "Naive solve: A\\b"
+@info "\n Naive solve: A\\b"
 @btime begin
     $A \ $b
     nothing
