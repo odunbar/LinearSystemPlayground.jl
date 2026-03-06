@@ -10,8 +10,9 @@ using BandedMatrices
 using IterativeSolvers
 using IncompleteLU
 
-#benchmark pkg
+#benchmarking pkg
 using BenchmarkTools
+using Arpack
 
 Random.seed!(153452)
 n = 500 # size of blocks
@@ -27,7 +28,7 @@ b = build_rhs(size(A,2))
 
 # load from file
 cases = ["trmm_0M", "trmm_1M", "rico_1M"]
-case = cases[3]
+case = cases[2]
 
 if case == "trmm_0M"
     filepath = "../../matrix_vector_pairs/linear_system_trmm_0M.jls"
@@ -79,6 +80,12 @@ x_true = A\b;
     nothing
 end
 @allocated gmres(A,b)
+M = A
+ev=eigvals(Matrix(M))
+spect_range = [maximum(abs,ev),minimum(abs,ev)]
+@info "(No-precond) cond. number = $(spect_range[1]/spect_range[2]) [closer to 1 is better]"
+@info "(No-precond). min eval magnitude= $(spect_range[2]) [larger is better]"
+
 x = gmres(A,b);
 @info "error $(norm(x - x_true))"
 
@@ -90,6 +97,16 @@ x = gmres(A,b);
     nothing
 end
 P = ilu(A)              # ILU(0)
+function apply_PinvA(v) 
+    P \ (A * v)
+end
+PinvA = LinearMap(apply_PinvA, size(A,1))
+ev=eigs(Matrix(PinvA), nev=20)[1] # get 20 evs
+spect_range = [maximum(abs,ev), minimum(abs,ev)]
+@info "Precond cond. number = $(spect_range[1]/spect_range[2]) [closer to 1 is better]"
+@info "Precond. min eval magnitude= $(spect_range[2]) [larger is better]"
+
+
 @allocated gmres(A,b, Pl=P)
 x = gmres(A, b, Pl=P);
 @info "error $(norm(x - x_true))"      
@@ -172,45 +189,87 @@ end
     nothing
 end
 @allocated do_gmres_schur_solve_PT2(T1, U, Vt, T2, Umat, b1, b2)
+
+P = ilu(T2)              # ILU(0)
+function apply_PinvT2(v)
+    F1 = lu(T1)
+    schur_action(x) = T2 * x - Vt * (F1 \ (U*x))
+    schur_adj_action(x) = T2' * x - U' * (F1 \ (Vt'*x))
+    
+    S2 = LinearMap(
+        schur_action,
+        schur_adj_action,
+        size(T2,1),
+        size(T2,1),
+    )
+    P \ (S2 * v)
+end
+
+PinvT2 = LinearMap(apply_PinvT2, size(T2,1))
+ev=eigs(Matrix(PinvT2), nev=20)[1] # get 20 evs
+spect_range = [maximum(abs,ev), minimum(abs,ev)]
+@info "Precond cond. number = $(spect_range[1]/spect_range[2]) [closer to 1 is better]"
+@info "Precond. min eval magnitude= $(spect_range[2]) [larger is better]"
+
+
 x=do_gmres_schur_solve_PT2(T1, U, Vt, T2, Umat, b1, b2);
 @info "err: $(norm(x_true - x)))"
 
-# [3] Fixed point iteration
+# [3] Fixed point iteration - Currently in clima
 #true soln
 x1_true,x2_true = x_true[1:s1], x_true[s1+1:end]
 
 @info "\n Fixed-point solve (with precond)"
-
-k=20
+# check preconditioning
+#iS2 = Diagonal(1 ./ diag(S2)) # correct
+#iS2 = Diagonal(1 ./ diag(T2)) # approx
 Td = diag(T1)
 iTd = 1 ./ Td
+iS2 = inv(Matrix(T2 - Vt * (iTd .* U))) # what clima does
 
-z_U = T1 \ Umat
-z_b = T1 \ b1
-rhs = b2-Vt*z_b
-S2 = Matrix(T2) - Vt * z_U
-
-x_it = zeros(size(T2,1))
-
-# correct Jacobi preconditioning
-#iS2 = Diagonal(1 ./ diag(S2)) # correct
-# iS2 = Diagonal(1 ./ diag(T2)) # approx
-iS2 = (Matrix(T2 - Vt * (iTd .* U))) # what clima claims?
-
-# check spectral radii
 M = I - iS2*S2
-spect = maximum(abs, eigvals(M))
+spect = maximum(abs, eigvals(Matrix(M)))
 @info "spectral radius: $(maximum(abs, eigvals(Matrix(M)))) must be <1 to converge)"
-if spect < 1
+
+function apply_fixed_point_iteration(T1, U, Vt, T2, Umat, b1, b2, num_iter)
+    x_it = zeros(size(T2,1))
+    
+    # build a preconditioner
+    Td = diag(T1)
+    iTd = 1 ./ Td
+    iS2 = inv(Matrix(T2 - Vt * (iTd .* U))) # what clima does
+
+    # create the schur solver
+    F1 = lu(T1)
+    schur_action(x) = T2 * x - Vt * (F1 \ (U*x))
+    schur_adj_action(x) = T2' * x - U' * (F1 \ (Vt'*x))
+    
+    S2 = LinearMap(
+        schur_action,
+        schur_adj_action,
+        size(T2,1),
+        size(T2,1),
+    )
     for i=1:k
         x_it .= x_it + iS2 * (rhs - S2*x_it)
-        println(norm(x_it-x2_true))
     end
     x1 = z_b - z_U * x_it
+    return [x1;x_it]
+end
+num_iter=2
+
+if spect < 1
+    @btime begin
+        apply_fixed_point_iteration($T1, $U, $Vt, $T2, $Umat, $b1, $b2, $num_iter)
+        nothing
+    end
+    x= apply_fixed_point_iteration(T1, U, Vt, T2, Umat, b1, b2, num_iter)
+    @info "err: $(norm(x_true - x)))"
+
 else
     @warn "skipping test due to spectral radius $(spect) > 1"
 end
-# Also doesnt seem to converge
 
+nothing
 
 
