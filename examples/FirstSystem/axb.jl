@@ -28,7 +28,7 @@ b = build_rhs(size(A,2))
 
 # load from file
 cases = ["trmm_0M", "trmm_1M", "rico_1M"]
-case = cases[3]
+case = cases[1]
 
 if case == "trmm_0M"
     filepath = "../../matrix_vector_pairs/linear_system_trmm_0M.jls"
@@ -60,6 +60,8 @@ b1, b2 = load_rhs_from_serialize(filepath, B1, B2)
 A = load_a_from_serialize(filepath, [B1;B2])
 b = load_rhs_from_serialize(filepath, [B1;B2])
 
+
+reltol = Float32(1e-6) # lower => more accurate but slower (gmres)
 # -----------
 # Full solves: A
 # ----------- 
@@ -76,24 +78,24 @@ x_true = A\b;
 # [2] Iterative solve - no precond
 @info "\n iterative solve (no precond): gmres(A,b)"
 @btime begin
-    gmres($A, $b)
+    gmres($A, $b; reltol= $reltol)
     nothing
 end
-@allocated gmres(A,b)
+@allocated gmres(A,b,reltol= reltol)
 M = A
 ev=eigvals(Matrix(M))
 spect_range = [maximum(abs,ev),minimum(abs,ev)]
 @info "(No-precond) cond. number = $(spect_range[1]/spect_range[2]) [closer to 1 is better]"
 @info "(No-precond). min eval magnitude= $(spect_range[2]) [larger is better]"
 
-x = gmres(A,b);
+x = gmres(A,b,reltol= reltol);
 @info "error $(norm(x - x_true))"
 
 # [3] Iterative solve - with basic left precond
 @info "\n iterative solve (ilu precond): gmres(A,b, Pl=P)"
 @btime begin
     P = ilu($A)              # ILU(0)
-    gmres($A, $b, Pl=P)  # left preconditioning
+    gmres($A, $b, Pl=P, reltol= $reltol)  # left preconditioning
     nothing
 end
 P = ilu(A)              # ILU(0)
@@ -101,14 +103,14 @@ function apply_PinvA(v)
     P \ (A * v)
 end
 PinvA = LinearMap(apply_PinvA, size(A,1))
-ev=eigs(Matrix(PinvA), nev=6)[1] # get 20 evs
+ev=eigs(Matrix(PinvA), nev=5)[1] # get 20 evs
 spect_range = [maximum(abs,ev), minimum(abs,ev)]
 @info "Precond cond. number = $(spect_range[1]/spect_range[2]) [closer to 1 is better]"
 @info "Precond. min eval magnitude= $(spect_range[2]) [larger is better]"
 
 
-@allocated gmres(A,b, Pl=P)
-x = gmres(A, b, Pl=P);
+@allocated gmres(A,b, Pl=P, reltol= reltol)
+x = gmres(A, b, Pl=P, reltol= reltol);
 @info "error $(norm(x - x_true))"      
 
 # [4] Jacobi solve
@@ -164,7 +166,7 @@ x = do_schur_solve(T1, U, Vt, T2, Umat, b1, b2);
 
 # [2] GMRES with (Schur with T2 precond), and allocates
 @info "\n GMRES (diagT1-based S2 precond) on Schur"
-function do_gmres_schur_solve_PS2(T1, U, Vt, T2, Umat, b1, b2)
+function do_gmres_schur_solve_PS2(T1, U, Vt, T2, Umat, b1, b2, reltol)
     F1 = ilu(T1)
     schur_action(x) = T2 * x - Vt * (F1 \ (U*x))
     schur_adj_action(x) = T2' * x - U' * (F1 \ (Vt'*x))
@@ -181,16 +183,16 @@ function do_gmres_schur_solve_PS2(T1, U, Vt, T2, Umat, b1, b2)
     PS2 = ilu(T2 - Vt * (iTd .* U)) # what clima does
     z = F1\b1
     rhs = b2 - Vt*z
-    x2 = gmres(S2, rhs ; Pl=PS2)
+    x2 = gmres(S2, rhs ; Pl=PS2, reltol=reltol) 
     x1 = z - F1\(Umat*x2)
     return [x1;x2]
 end
 
 @btime begin
-    do_gmres_schur_solve_PS2($T1, $U, $Vt, $T2, $Umat, $b1, $b2)
+    do_gmres_schur_solve_PS2($T1, $U, $Vt, $T2, $Umat, $b1, $b2, $reltol)
     nothing
 end
-@allocated do_gmres_schur_solve_PS2(T1, U, Vt, T2, Umat, b1, b2)
+@allocated do_gmres_schur_solve_PS2(T1, U, Vt, T2, Umat, b1, b2, reltol)
 
 Td = diag(T1)
 iTd = 1 ./ Td
@@ -210,13 +212,13 @@ function apply_PinvS2(v)
 end
 
 PinvS2 = LinearMap(apply_PinvS2, size(T2,1))
-ev=eigs(Matrix(PinvS2), nev=6)[1] # get 20 evs
+ev=eigs(Matrix(PinvS2), nev=5)[1] # get 20 evs
 spect_range = [maximum(abs,ev), minimum(abs,ev)]
 @info "Precond cond. number = $(spect_range[1]/spect_range[2]) [closer to 1 is better]"
 @info "Precond. min eval magnitude= $(spect_range[2]) [larger is better]"
 
 
-x=do_gmres_schur_solve_PS2(T1, U, Vt, T2, Umat, b1, b2);
+x=do_gmres_schur_solve_PS2(T1, U, Vt, T2, Umat, b1, b2, reltol);
 @info "err: $(norm(x_true - x)))"
 
 # [3] Fixed point iteration - Currently in clima
