@@ -28,7 +28,7 @@ b = build_rhs(size(A,2))
 
 # load from file
 cases = ["trmm_0M", "trmm_1M", "rico_1M"]
-case = cases[2]
+case = cases[3]
 
 if case == "trmm_0M"
     filepath = "../../matrix_vector_pairs/linear_system_trmm_0M.jls"
@@ -101,7 +101,7 @@ function apply_PinvA(v)
     P \ (A * v)
 end
 PinvA = LinearMap(apply_PinvA, size(A,1))
-ev=eigs(Matrix(PinvA), nev=20)[1] # get 20 evs
+ev=eigs(Matrix(PinvA), nev=6)[1] # get 20 evs
 spect_range = [maximum(abs,ev), minimum(abs,ev)]
 @info "Precond cond. number = $(spect_range[1]/spect_range[2]) [closer to 1 is better]"
 @info "Precond. min eval magnitude= $(spect_range[2]) [larger is better]"
@@ -138,9 +138,8 @@ end
 # ------------
 
 # split rhs
-s1 = size(T1,1) 
-#b1, b2 = b[1:s1], b[s1+1:end]
-Umat = Matrix(U)
+s1 = size(T1,1) # size of block1
+Umat = Matrix(U) # for when using sparse matrix as RHS
 
 
 # [1] Naive solve
@@ -206,7 +205,7 @@ function apply_PinvT2(v)
 end
 
 PinvT2 = LinearMap(apply_PinvT2, size(T2,1))
-ev=eigs(Matrix(PinvT2), nev=20)[1] # get 20 evs
+ev=eigs(Matrix(PinvT2), nev=6)[1] # get 20 evs
 spect_range = [maximum(abs,ev), minimum(abs,ev)]
 @info "Precond cond. number = $(spect_range[1]/spect_range[2]) [closer to 1 is better]"
 @info "Precond. min eval magnitude= $(spect_range[2]) [larger is better]"
@@ -225,6 +224,7 @@ x1_true,x2_true = x_true[1:s1], x_true[s1+1:end]
 #iS2 = Diagonal(1 ./ diag(T2)) # approx
 Td = diag(T1)
 iTd = 1 ./ Td
+S2 = Matrix(T2 - Vt * (T1\ Umat))
 iS2 = inv(Matrix(T2 - Vt * (iTd .* U))) # what clima does
 
 M = I - iS2*S2
@@ -237,7 +237,7 @@ function apply_fixed_point_iteration(T1, U, Vt, T2, Umat, b1, b2, num_iter)
     # build a preconditioner
     Td = diag(T1)
     iTd = 1 ./ Td
-    iS2 = inv(Matrix(T2 - Vt * (iTd .* U))) # what clima does
+    S2_prec = Matrix(T2 - Vt * (iTd .* U)) # what clima does
 
     # create the schur solver
     F1 = lu(T1)
@@ -251,9 +251,9 @@ function apply_fixed_point_iteration(T1, U, Vt, T2, Umat, b1, b2, num_iter)
         size(T2,1),
     )
     for i=1:k
-        x_it .= x_it + iS2 * (rhs - S2*x_it)
+        x_it .= x_it + S2_prec \ (rhs - S2*x_it)
     end
-    x1 = z_b - z_U * x_it
+    x1 = (F1 \ b) - (F1 \ (U * x_it))
     return [x1;x_it]
 end
 num_iter=2
