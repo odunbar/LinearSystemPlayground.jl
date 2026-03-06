@@ -76,6 +76,7 @@ function load_a_from_serialize(filepath)
 end
 
 function add_uniform_scaling!(α, row0, col0, nrow, ncol, I, J, V)
+    FT=eltype(V)
     n = min(nrow, ncol)
     @inbounds for i in 1:n
         a = FT(α)
@@ -88,6 +89,7 @@ function add_uniform_scaling!(α, row0, col0, nrow, ncol, I, J, V)
 end
 
 function add_banded!(B::BandedMatrix, row0, col0, I, J, V)
+    FT=eltype(V)
     nrow, ncol = size(B)
     kl, ku = bandwidths(B)
     @inbounds for j in 1:ncol
