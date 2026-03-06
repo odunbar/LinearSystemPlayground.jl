@@ -253,7 +253,7 @@ function apply_fixed_point_iteration(T1, U, Vt, T2, Umat, b1, b2, num_iter)
     for i=1:k
         x_it .= x_it + S2_prec \ (rhs - S2*x_it)
     end
-    x1 = (F1 \ b) - (F1 \ (U * x_it))
+    x1 = (F1 \ b1) - (F1 \ (U * x_it))
     return [x1;x_it]
 end
 num_iter=2
