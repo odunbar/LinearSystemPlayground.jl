@@ -1,4 +1,5 @@
 import ClimaCore.MatrixFields
+import ClimaAtmos as CA
 
 using SparseArrays
 using Serialization
@@ -75,6 +76,40 @@ function extract_block_and_rhs_arrays(integrator)
     end
 
     return (; block_arrays, rhs_arrays)
+end
+
+function benchmark_clima_core_solver(integrator)
+    Y = integrator.u
+    t = integrator.t
+    (; p) = integrator
+    FT = eltype(Y)
+    column_Y = CA.first_column_view(Y)
+    column_p = CA.first_column_view(p)
+    for n = 0:5
+        column_Δx = copy(CA.first_column_view(integrator.cache.newtons_method_cache.Δx)) .* 0
+        column_f = CA.first_column_view(integrator.cache.newtons_method_cache.f)
+        dtγ = p.dt * FT(CA.LinearAlgebra.diag(integrator.alg.tableau.a_imp)[end])
+        jac_alg = CA.ManualSparseJacobian(
+            CA.DerivativeFlag(CA.has_topography(axes(Y.c))),
+            CA.DerivativeFlag(p.atmos.diff_mode),
+            CA.DerivativeFlag(p.atmos.sgs_adv_mode),
+            CA.DerivativeFlag(p.atmos.sgs_entr_detr_mode),
+            CA.DerivativeFlag(p.atmos.sgs_mf_mode),
+            CA.DerivativeFlag(p.atmos.sgs_nh_pressure_mode),
+            CA.DerivativeFlag(p.atmos.sgs_vertdiff_mode),
+            n,
+        )
+        column_cache = CA.jacobian_cache(jac_alg, column_Y, p.atmos; verbose = false)
+        CA.update_jacobian!(jac_alg, column_cache, column_Y, column_p, dtγ, t)
+        jac = CA.Jacobian(jac_alg, column_cache)
+
+        @show n
+        @btime begin
+            ldiv!($column_Δx, $jac, $column_f)
+            nothing
+        end
+        @show norm(column_Δx)
+    end
 end
 
 """
